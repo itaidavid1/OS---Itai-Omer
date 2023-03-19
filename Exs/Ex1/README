@@ -1,0 +1,87 @@
+
+
+Assignment 1:
+The code is an example of system call for a program name whatIDo
+Briefly:
+As mentioned in the ex file, we can ignore all the file loading commands, and focus on the program.
+The program is creating a directory called "welcome_dir_1" in the current working directory and then creating another
+directory inside it called "welcome_dir_2". We will notice that the directories open with full permissions indicated by
+the value of 0777. It allocates memory for the program data segment and then creates a file called "welcome_file.txt"
+inside "welcome_dir_2", writes "welcome to OS-2023" to it, and closes the file. We can notice that the program also
+reads from the localtime file, and changing the offset of the file and reading it again but not writing it.
+At the end, The code then deletes "welcome_file.txt", "welcome_dir_2", followed by deleting "welcome_dir_1".
+Finally, the program exits with status 0.
+
+In detailed:
+we will describe each line to explain the program:
+1. mkdir("./welcome_dir_1", 0777) = 0 : creates a new directory called "welcome_dir_1" in the current directory with
+full permissions by the value of 0777.
+The mkdir function returns 0 on success.
+
+2. mkdir("./welcome_dir_1/welcome_dir_2", 0777) = 0 : same as section 1, but here creates
+a new subdirectory called "welcome_dir_2" inside the "welcome_dir_1"
+
+3. brk(NULL) = 0x562af8dbe000 : usually brk command sets the end of the data segment to the given address
+here we using this with null, so the function returns the current program break address,
+which is 9.4742564e+13 - meaning checking where is the heap memory ends
+
+4. brk(0x562af8ddf000) = 0x562af8ddf000: to increase the program's data segment by a certain amount, up to the given
+address - allocating space by changing the end of the data segment address to the new given one.
+
+5. openat(AT_FDCWD, "./welcome_dir_1/welcome_dir_2/welcome_file.txt" :
+according to the man function, the "openat" system call we used is:
+int openat(int dirfd, const char *pathname, int flags, mode_t mode); has 4 argument,
+and according to this the given line  opens a new file called "welcome_file.txt" inside the path
+./welcome_dir_1/welcome_dir_2/. The given AT_FDCWD indicats to take  a relative path argument will be resolved relative
+to the current working directory, and the flags after are specify that the file for writing and
+creating it if it didnt exist already. The return value 3 is a possitive number which indicates
+for success job and gives a uniquely identifies for the file.
+
+6. openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 4:
+opens the system's local time zone file, located at "/etc/localtime", only for reading. the 4 return value for success.
+
+7. fstat(4, {st_mode=S_IFREG|0644, st_size=2388, ...}) = 0:
+gets the file descriptor and buffer. get  the information about the file descriptor 4, which is currently pointing to
+the local time zone file from section 6.
+
+8. fstat(4, {st_mode=S_IFREG|0644, st_size=2388, ...}) = 0: the same as above
+
+9. read(4, "TZif3\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\t\0\0\0\t\0\0\0\0"..., 4096) = 2388  :
+ssize_t read(int fd, void *buf, size_t count);
+read() attempts to read up to count bytes from file descriptor fd into the buffer starting at buf.
+in this case we are trying to read file 4 which is the time zone file. The return value is the number
+of bytes the system read.
+
+10. lseek(4, -1506, SEEK_CUR) = 882 :
+moves the current offset of the file descriptor 4 back by 1506 bytes
+the return value of 882 indicates that the new offset is byte 882.
+We can see that the last offset was 2388 -1506 will bring us to 882
+
+11. read(4, "TZif3\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\t\0\0\0\t\0\0\0\0"..., 4096) = 1506
+now from the 882 offset we reat 1506 bytes until the end
+
+12 . close(4)= 0  : closing the file for reading
+
+13. fstat(3, {st_mode=S_IFREG|0644, st_size=0, ...}) = 0 :
+   gets the file descriptor and buffer. get  the information about the file descriptor 3, which is currently pointing to
+    the welcome file from section 5.
+
+14. write(3, "welcome to OS-2023", 18) = 18: write the string "welcome to OS-2023" to the file
+The return value is the number of bytes writen in the file- and 18 is the size of the
+"welcome to OS-2023" string.
+
+15. close(3) = 0: closing the file above
+
+16. unlink("./welcome_dir_1/welcome_dir_2/welcome_file.txt") = 0 : deleting file - it deleted successfully.
+
+17. unlink("./welcome_dir_1/welcome_dir_2") = -1 EISDIR (Is a directory: tryed to delete file where it is directory
+and failed
+
+18 . rmdir("./welcome_dir_1/welcome_dir_2")  = 0 : deleting the dir successfully
+
+19. unlink("./welcome_dir_1") = -1 EISDIR (Is a directory) +  rmdir("./welcome_dir_1") = 0:
+same sequence as above
+
+20. exit_group(0) = ? : closing all treads of the program, returning nothing therefor ?
+
+21. +++ exited with 0 +++ : output of the screen after finishing strace
