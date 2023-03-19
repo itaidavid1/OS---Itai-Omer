@@ -1,5 +1,6 @@
 #include <sys/time.h>
 #include "osm.h"
+#include <cstddef>
 
 /* Time measurement function for a simple arithmetic operation.
    returns time in nano-seconds upon success,
