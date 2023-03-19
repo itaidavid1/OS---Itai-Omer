@@ -1,0 +1,2 @@
+ssh -J itai.david@bava.cs.huji.ac.il itai.david@river /* connect to CS computer */
+qemu-system-x86_64 -nographic -hda linux-tinycore-linux-6.4-2.img /* running the vm when its on your directory*/
