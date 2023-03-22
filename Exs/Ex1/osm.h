@@ -28,5 +28,6 @@ double osm_function_time(unsigned int iterations);
    */
 double osm_syscall_time(unsigned int iterations);
 
+void does_nothing();
 
 #endif

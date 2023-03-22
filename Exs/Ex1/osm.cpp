@@ -6,6 +6,8 @@
    returns time in nano-seconds upon success,
    and -1 upon failure.
    */
+
+
 double osm_operation_time(unsigned int iterations)
 {
     struct timeval t1, t2; // holding datatype of type timavals which is struct
@@ -27,12 +29,15 @@ double osm_operation_time(unsigned int iterations)
    returns time in nano-seconds upon success,
    and -1 upon failure.
    */
+
+void empty_func(){}
+
 double osm_function_time(unsigned int iterations)
 {
     struct timeval t1, t2;
     unsigned int i;
 
-    void empty_func(); //declare a function that return void and has no arguments
+     //declare a function that return void and has no arguments
 
     gettimeofday(&t1, NULL);
     for (i = 0; i < iterations; i++) {
