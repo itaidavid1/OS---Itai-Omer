@@ -12,7 +12,7 @@ double osm_operation_time(unsigned int iterations)
 {
     struct timeval t1, t2; // holding datatype of type timavals which is struct
     unsigned int i;
-    unsigned int a;
+    unsigned int a = 1;
 
     gettimeofday(&t1, NULL); // using gettimeofday for the first iteration
     for (i = 0; i < iterations; i++) {
@@ -30,14 +30,14 @@ double osm_operation_time(unsigned int iterations)
    and -1 upon failure.
    */
 
-void empty_func(){}
 
 double osm_function_time(unsigned int iterations)
 {
     struct timeval t1, t2;
     unsigned int i;
+    void empty_func(){};
 
-     //declare a function that return void and has no arguments
+  //declare a function that return void and has no arguments
 
     gettimeofday(&t1, NULL);
     for (i = 0; i < iterations; i++) {

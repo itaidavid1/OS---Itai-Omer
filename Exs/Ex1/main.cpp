@@ -16,14 +16,12 @@ int main() {
 
   op_time = osm_operation_time(iterations);
   empty_func_time = osm_function_time(iterations);
-//  osm_call_time = osm_syscall_time(iterations);
+  osm_call_time = osm_syscall_time(iterations);
 
-//  std::cout << "running " + std::to_string(iterations) + " iterations" << std::endl ;
+  std::cout << "running " + std::to_string(iterations) + " iterations" << std::endl ;
   std::cout << "operation : " + std::to_string(op_time) + " nns" << std::endl ;
-//  std::cout << "empty functions call : " + std::to_string(empty_func_time) + " nns" << std::endl ;
-//  std::cout << "osm call : " + std::to_string(osm_call_time) + " nns" << std::endl ;
-  std::cout << "osm call" << std::endl;
-  const char*nul = nullptr;
-  std::cout << "before "<< nul << "after\n";
+  std::cout << "empty functions call : " + std::to_string(empty_func_time) + " nns" << std::endl ;
+  std::cout << "osm call : " + std::to_string(osm_call_time) + " nns" << std::endl ;
+
   return 0;
 }
