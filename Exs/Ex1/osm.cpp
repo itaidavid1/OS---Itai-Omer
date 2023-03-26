@@ -1,27 +1,42 @@
-#include <sys/time.h>
 #include "osm.h"
-#include <cstddef>
+#include <sys/time.h>
+
+
+/**
+ * function which does nothing
+ */
+void does_nothing() {}
 
 /* Time measurement function for a simple arithmetic operation.
    returns time in nano-seconds upon success,
    and -1 upon failure.
    */
-
-
-double osm_operation_time(unsigned int iterations)
-{
-    struct timeval t1, t2; // holding datatype of type timavals which is struct
-    unsigned int i;
-    unsigned int a;
-
-    gettimeofday(&t1, NULL); // using gettimeofday for the first iteration
-    for (i = 0; i < iterations; i++) {
-        a = i + 1; // single addition
+double osm_operation_time(unsigned int iterations) {
+    if (iterations == 0) {
+        return -1;
     }
-    gettimeofday(&t2, NULL); // using gettimeofday for the end of iteration
-
-    /* compute the elapsed time in nano-seconds */
-    return ((t2.tv_sec * 1000000 + t2.tv_usec) - (t1.tv_sec * 1000000 + t1.tv_usec)) * 1000.0 / iterations;
+    // basic addition operation on the variable n
+    unsigned int n = 0;
+    struct timeval current_time;
+    gettimeofday(&current_time, nullptr);
+    time_t start = current_time.tv_usec + current_time.tv_sec*1000000;
+    int x=1;
+    for(n = 0; n < iterations; n += 10) {
+        x = n + 1;
+        x = n + 2;
+        x = n + 3;
+        x = n + 4;
+        x = n + 5;
+        x = n + 6;
+        x = n + 7;
+        x = n + 8;
+        x = n + 9;
+        x = n + 10;
+    }
+    gettimeofday(&current_time, nullptr);
+    time_t time = (current_time.tv_usec + current_time.tv_sec*1000000) - start;
+    // calculate the time and divide by iterations (in nanoseconds)
+    return (double) time/iterations * 1000;
 }
 
 
@@ -29,44 +44,62 @@ double osm_operation_time(unsigned int iterations)
    returns time in nano-seconds upon success,
    and -1 upon failure.
    */
-
-void empty_func(){}
-
-double osm_function_time(unsigned int iterations)
-{
-    struct timeval t1, t2;
-    unsigned int i;
-
-     //declare a function that return void and has no arguments
-
-    gettimeofday(&t1, NULL);
-    for (i = 0; i < iterations; i++) {
-        /* call an empty function */
-        empty_func();
+double osm_function_time(unsigned int iterations) {
+    if (iterations == 0) {
+        return -1;
     }
-    gettimeofday(&t2, NULL);
-
-    /* compute the elapsed time in nano-seconds */
-    return ((t2.tv_sec * 1000000 + t2.tv_usec) - (t1.tv_sec * 1000000 + t1.tv_usec)) * 1000.0 / iterations;
+    // basic addition operation on the variable n
+    unsigned int n = 0;
+    struct timeval current_time;
+    gettimeofday(&current_time, nullptr);
+    time_t start = current_time.tv_usec + current_time.tv_sec*1000000;
+    for(n = 0; n < iterations; n += 10) {
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+        does_nothing();
+    }
+    gettimeofday(&current_time, nullptr);
+    time_t time = (current_time.tv_usec + current_time.tv_sec*1000000) - start;
+    // calculate the time and divide by iterations
+    return (double) time/iterations * 1000;
 }
+
 
 
 /* Time measurement function for an empty trap into the operating system.
    returns time in nano-seconds upon success,
    and -1 upon failure.
    */
-double osm_syscall_time(unsigned int iterations)
-{
-    struct timeval t1, t2;
-    unsigned int i;
-
-    gettimeofday(&t1, NULL);
-    for (i = 0; i < iterations; i++) {
-        /* trigger a system call that does nothing */
+double osm_syscall_time(unsigned int iterations) {
+    if (iterations == 0) {
+        return -1;
+    }
+    // basic addition operation on the variable n
+    unsigned int n = 0;
+    struct timeval current_time;
+    gettimeofday(&current_time, nullptr);
+    time_t start = current_time.tv_usec + current_time.tv_sec*1000000;
+    for(n = 0; n < iterations; n += 10) {
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
+        OSM_NULLSYSCALL;
         OSM_NULLSYSCALL;
     }
-    gettimeofday(&t2, NULL);
-
-    /* compute the elapsed time in nano-seconds */
-    return ((t2.tv_sec * 1000000 + t2.tv_usec) - (t1.tv_sec * 1000000 + t1.tv_usec)) * 1000.0 / iterations;
+    gettimeofday(&current_time, nullptr);
+    time_t time = (current_time.tv_usec + current_time.tv_sec*1000000) - start;
+    // calculate the time and divide by iterations
+    return (double) time/iterations * 1000;
 }
