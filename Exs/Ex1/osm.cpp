@@ -16,7 +16,7 @@ double osm_operation_time(unsigned int iterations)
 
     gettimeofday(&t1, NULL); // using gettimeofday for the first iteration
     for (i = 0; i < iterations; i++) {
-        a = i + 1; // single addition
+        a += 1; // single addition
     }
     gettimeofday(&t2, NULL); // using gettimeofday for the end of iteration
 
@@ -35,7 +35,7 @@ double osm_function_time(unsigned int iterations)
 {
     struct timeval t1, t2;
     unsigned int i;
-    void empty_func(){};
+    auto empty_func =[](){};
 
   //declare a function that return void and has no arguments
 
