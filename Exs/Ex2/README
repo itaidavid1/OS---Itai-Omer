@@ -1,0 +1,61 @@
+omer.itach, itai.david
+Omer Itach 314963372, Itai David 316088327
+Ex1
+
+FILES:
+
+ANSWERS:
+1.
+    a. sigsetjmp behaves like "bookmark"- saves the current stack context of the thread and also the CPU state,
+ including the current signal mask, according to boolean value, and stores it in a buffer. The buffer is read by
+ siglongjmp function to install the thread. The return value can be either 0 or return value from the siglongjmp function.
+ which can later be restored using siglongjmp. It allows a program to save its current state, set up a new signal mask,
+ and jump to a previously saved execution context.
+ siglongjmp is used to restore the saved execution context of the given thread and the CPU state, including the signal
+ mask if was saved, and resume thread execution from the point where sigsetjmp was called. The second argument is the
+ return value of sigsetjump after arriving from this siglongjump call.
+    b. If the boolean argument in sigsetjmp  is 0 - it doesnt save the current mask and can delete it for future running
+    of that thread. Siglongjmp restore the mask from the buffer of the sigsetjmp and if the mask was not saved
+
+
+2. One general example we saw for User-level thread are in servers such as Web-server that opens multi threads
+for each client request from different users. In that way the web server can perform multi tasks and communicate with
+multiple users.  By using user-level threads, an application can make more efficient use of system resources. If not
+we would have to use many web servers for many users or each one of the user had to wait longer until each user or
+process before him finishes his request.
+
+3.
+Advantages:
+One optional advantage is the idea of isolation. Each chrome tab run it own process and has its own stack, which
+saves data about and for that process. Some of that data might be relevant only for that tab (such as passwords or
+private information) that the user don't want to share with other tabs that includes different services. With using
+thread, the browser can isolate that information and destroy it when the tab close and the process ennd.
+Another advantage is Efficiency in running time and memory allocation- assume that we have only one process that includes
+all tabs, CPU actions might be slower or if we want do kill one tab, it will be more complicated to delete it
+information and reuse the space in efficient way.
+Disadvanteges:
+One disadvantage is the overhead from creating multiple processes, because we need to allocated for each process all
+ the resources needed for its execution even if multiple processes can share mutual resources together, so in this case
+ denoting each tab as thread would be more efficient.
+Another disadvantage for using multiple processes is the communication and data sharing between processes that can be
+ more complex and slow, because every time we want to share data or even just to switch between processes we need to use
+ context switch which we saw in lecture is causing an overhead and if we want to share data we need to serialize it
+ which is more slowly than sharing data between threads.
+
+4. We opened Shotwell and by ps -A saw that the pid = 209859 and killed it.
+While typing the kill command and also the list of all processes Id's, there was I/O interrapt from
+the keyboard to the OS and handel by the OS.
+Later, after the OS translated the kill command it was responsible for delivering the "SIGTERM" signal to the target
+process. The process itself is responsible for handling that signal. In this case, the "shotwell" process is the one
+handled the signal and perform any necessary cleanup operations before exiting (SI_USER) - meaning the
+signal was sent from the user.
+
+5. Real time refers to the actual time that passes in the real world, whereas virtual time is an abstraction that
+ used to simulate time-dependent processes or to schedule tasks based on the CPU.
+ Example for real time is the stock market- that based on real time events- opening the trade, selling stocks
+ in specific process etc.
+ Example for virtual time is the time or time schedule we are using in the exercise, to switch between threads
+ or processes.
+
+
+
