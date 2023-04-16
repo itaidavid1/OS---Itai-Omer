@@ -15,10 +15,17 @@
 #defing SUCCESS 0
 #define INVALID_QUANTUM_SIZE "thread library error: Invalid quantum size- less than 0"
 #define THREADS_OVERLOAD "system error: The Threads capacity exceeded"
-#define INVALID_THREAD_ID "thread library error: Invalid Thread Id"
+#define INVALID_THREAD_ID "thread library error:  Thread Id is not in the valid range (0 to MAX_THREAD) "
+#define THREAD_ID_NOT_IN_USE "thread library error:  Thread Id is not in use "
+#define INVALID_THREAD_BLOCK_ITSELF "thread library error: Invalid Thread Id- The Thread is already blocked"
+#define INVALID_THREAD_ID_RESUME_RUNNING "thread library error: Invalid Thread Id- The Thread is already running"
+#define INVALID_THREAD_ID_RESUME_READY "thread library error: Invalid Thread Id- The Thread is already ready"
+#define INVALID_QUANTUM_SIZE "thread library error: Invalid Quantum size for blocking the thread "
+#define RUNNING_THREAD_IS_NULL "system error: There is no running thread currently "
+#define NOT_YET_INITIALIZE_THREADS "system error: First Initialize threads"
 
 ///////GLOBALS////////
-int processQuantumCount;
+int processQuantumCount = 0;
 
 // insering the available threads number
 std::set<int> availableThreadsId;
@@ -27,8 +34,6 @@ availableThreadsId.insert(i);
 }
 
 // Threads vector
-
-
 
 
 /**
@@ -63,6 +68,10 @@ struct Thread{
         // TODO add setup function
     }
 
+    isSleep(){
+        return sleepingCount > 0;
+    }
+
     ~Thread(){
         delete[] this->threadStack;
     }
@@ -70,11 +79,26 @@ struct Thread{
 }  ;
 
 /////////////////////////// Threads Management //////////////////
-std::map<int,Thread*> threadsVector; // curr
-std::map<int, Thread*> readyThreads; // queue
+std::map<int,Thread*> threadsMap; // curr
+std::vector<Thread*> readyThreads; // queue
 std::map<int, Thread*> sleepingThreads; //sleeping
-
 Thread* runningThread
+
+////////////////////// HELPERS ////////////////////
+bool inValid(int tid){
+
+    if(tid < 0  || tid >= MAX_THREAD_NUM){
+        std::cerr << INVALID_THREAD_ID << std::endl;
+        return true
+    }
+    if (availableThreadsId.find(tid) != availableThreadsId.end())
+    {
+        std::cerr << THREAD_ID_NOT_IN_USE << std::endl;
+        return true
+    }
+    return false;
+}
+
 
 /**
  * @brief initializes the thread library.
@@ -94,21 +118,22 @@ int uthread_init(int quantum_usecs)
         std::cerr << INVALID_QUANTUM_SIZE << std::endl;
         return FAIL;
     }
-    quantumCount = 0;
+    quantumCount = 0; // should increase to 1 in the scheduler - first time iteration
     //  initialize the first thread and push it to the threads vector
     int tid =  availableThreadsId.begin()
-    threadsVector[tid] = new Thread(nullptr, tid);
+    threadsMap[tid] = new Thread(nullptr, tid);
     //fixing the set the first id
     availableThreadsId.erase(tid);
 
-    runningThread = threadsVector[0];
+    runningThread = threadsMap[0];
     runningThread->state = RUNNING;
     runningThread->threadQuantum++;
-    processQuantumCount ++;
+    processQuantumCount = 1;
 
     return EXIT_SUCCESS
 
     //  TODO anything else? changing the count?
+    // WHAT IS THE running thread
 
 }
 
@@ -126,7 +151,7 @@ int uthread_init(int quantum_usecs)
 */
 int uthread_spawn(thread_entry_point entry_point)
 {
-    if (threadsVector.size() >= MAX_THREAD_NUM){
+    if (threadsMap.size() >= MAX_THREAD_NUM){
         std::cerr << THREADS_OVERLOAD << std::endl;
         return FAIL;
     }
@@ -134,8 +159,8 @@ int uthread_spawn(thread_entry_point entry_point)
     Thread thread = new Thread(entry_point, avail_id);
     // TODO : maybe add a check if thread allocation succeed
     availableThreadsId.erase(avail_id);
-    threadsVector[avail_id] = thread;
-    readyThreads[avail_id] = thread;
+    threadsMap[avail_id] = thread;
+    readyThreads.push_back(thread);
     return avail_id;
 }
 
@@ -151,14 +176,38 @@ int uthread_spawn(thread_entry_point entry_point)
  * itself or the main thread is terminated, the function does not return.
 */
 int uthread_terminate(int tid){
-    if (availableThreadsId.find(tid) != availableThreadsId.end())
+    // if the given id is in the available means no anle to kill it
+
+    if (inValid(tid))
     {
-        std::cerr << INVALID_THREAD_ID << std::endl;
         return FAIL;
     }
 
+    Thread* thread = threadsMap[tid];
+
+    //TODO check if TID ==0
+    //TODO chack if running
+    //  erasing from ready threads and sleeping threads
+    if(thread->state == READY){
+        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
+        readyThreads.erase(pos);
+    }
+
+    if(thread->sleepingCount > 0){
+        sleepingThreads.erase(tid);
+    }
+
+    //removing from map
+    threadsMap.erase(tid);
+    // delete the boject
+    delete thread;
+    //adding to available id's
+    availableThreadsId.insert(tid);
+    return EXIT_SUCCESS
 
 }
+
+
 
 
 /**
@@ -170,8 +219,35 @@ int uthread_terminate(int tid){
  *
  * @return On success, return 0. On failure, return -1.
 */
-int uthread_block(int tid);
+int uthread_block(int tid){
 
+    if (inValid(tid))
+    {
+        return FAIL;
+    }
+    Thread* thread = threadsMap[tid];
+
+    if(thread->state == BLOCK){
+        std::cerr << INVALID_THREAD_BLOCK_ITSELF << std::endl;
+        return FAIL;
+    }
+
+    // TODO - If a thread blocks itself, a scheduling decision should be made handel that case
+
+    //TODO - handel if we block the running
+
+    // not sleeping and ready
+    if(thread->state == READY && !thread->isSleep()){
+        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
+        readyThreads.erase(pos);
+    }
+
+    thread->state = BLOCK;
+
+    // TODO schedual handel
+    return EXIT_SUCCESS;
+
+}
 
 /**
  * @brief Resumes a blocked thread with ID tid and moves it to the READY state.
@@ -181,7 +257,33 @@ int uthread_block(int tid);
  *
  * @return On success, return 0. On failure, return -1.
 */
-int uthread_resume(int tid);
+int uthread_resume(int tid){
+
+    if (inValid(tid))
+    {
+        return FAIL;
+    }
+
+    Thread* thread = threadsMap[tid];
+
+    if(thread->state == READY){
+        std::cerr << INVALID_THREAD_ID_RESUME_READY << std::endl;
+        return FAIL;
+    }
+    if(thread->state == RUNNING){
+        std::cerr << INVALID_THREAD_ID_RESUME_RUNNING << std::endl;
+        return FAIL;
+    }
+    if(thread->state == BLOCK){
+        if(thread->sleepingCount == 0){
+            readyThreads.push_back(thread);
+        }
+        thread->state= READY;
+    }
+
+    return EXIT_SUCCESS;
+
+}
 
 
 /**
@@ -199,8 +301,22 @@ int uthread_resume(int tid);
 */
 int uthread_sleep(int num_quantums)
 {
-    // treadVector[0].sleep = num_quantums
-//treadVector[0].status = BLOCK
+  if(num_quantums <= 0){
+      std::cerr << INVALID_QUANTUM_SIZE << std::endl;
+      return FAIL
+  }
+
+  // sleep the current thread
+  runningThread->state = READY;
+  sleepingThreads[runningThread->threadId] = runningThread; // TODO validate changing the pointer
+  runningThread->sleepingCount = num_quantums;
+
+  runningThread = nullptr; // maybe not need
+  return EXIT_SUCCESS;
+
+  // TODO is schedualler responsibility to change the running to be readyTHread [0] ?
+  // TODO change the ready map to be vector !!!!!!!!!!!!!!!!!!!!!!
+
 }
 
 
@@ -209,7 +325,13 @@ int uthread_sleep(int num_quantums)
  *
  * @return The ID of the calling thread.
 */
-int uthread_get_tid();
+int uthread_get_tid(){
+    if(runningThread == nullptr){
+        std::cerr << RUNNING_THREAD_IS_NULL << std::endl;
+        return FAIL;
+    }
+    return runningThread->threadId;
+}
 
 
 /**
@@ -220,7 +342,14 @@ int uthread_get_tid();
  *
  * @return The total number of quantums.
 */
-int uthread_get_total_quantums();
+int uthread_get_total_quantums()
+{
+    if(runningThread == 0){
+        std::cerr << NOT_YET_INITIALIZE_THREADS << std::endl;
+        return FAIL;
+    }
+    return processQuantumCount;
+}
 
 
 /**
@@ -232,4 +361,10 @@ int uthread_get_total_quantums();
  *
  * @return On success, return the number of quantums of the thread with ID tid. On failure, return -1.
 */
-int uthread_get_quantums(int tid);
+int uthread_get_quantums(int tid){
+    if(inValid(tid))
+    {
+        return FAIL;
+    }
+    return threadsMap[tid]->threadQuantum;
+}
