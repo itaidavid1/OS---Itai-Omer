@@ -7,6 +7,7 @@
 #include "vector"
 #include "map"
 #include "set"
+#include <sys/time.h>
 
 
 
@@ -20,20 +21,18 @@
 #define INVALID_THREAD_BLOCK_ITSELF "thread library error: Invalid Thread Id- The Thread is already blocked"
 #define INVALID_THREAD_ID_RESUME_RUNNING "thread library error: Invalid Thread Id- The Thread is already running"
 #define INVALID_THREAD_ID_RESUME_READY "thread library error: Invalid Thread Id- The Thread is already ready"
-#define INVALID_QUANTUM_SIZE "thread library error: Invalid Quantum size for blocking the thread "
+#define INVALID_QUANTUM_NUM "thread library error: Invalid Quantum size for blocking the thread "
 #define RUNNING_THREAD_IS_NULL "system error: There is no running thread currently "
 #define NOT_YET_INITIALIZE_THREADS "system error: First Initialize threads"
+#define SET_TIMER_FAIL "set timer failed"
 
 ///////GLOBALS////////
 int processQuantumCount = 0;
-
 // insering the available threads number
 std::set<int> availableThreadsId;
-for (int i = 0; i < MAX_THREAD_NUM; i++) {
-availableThreadsId.insert(i);
-}
+////////////////////////////////////
 
-// Threads vector
+
 
 
 /**
@@ -42,8 +41,6 @@ availableThreadsId.insert(i);
 typedef enum State{
     READY, BLOCK, RUNNING
 } State;
-
-
 
 /**
  *
@@ -75,7 +72,6 @@ struct Thread{
     ~Thread(){
         delete[] this->threadStack;
     }
-
 }  ;
 
 /////////////////////////// Threads Management //////////////////
@@ -83,6 +79,7 @@ std::map<int,Thread*> threadsMap; // curr
 std::vector<Thread*> readyThreads; // queue
 std::map<int, Thread*> sleepingThreads; //sleeping
 Thread* runningThread
+////////////////////////////////////////////////////////////////////
 
 ////////////////////// HELPERS ////////////////////
 bool inValid(int tid){
@@ -99,7 +96,121 @@ bool inValid(int tid){
     return false;
 }
 
+void setAvailableIndices(){
+    for (int i = 0; i < MAX_THREAD_NUM; i++) {
+        availableThreadsId.insert(i);
+    }
+}
 
+void freeAll(){
+
+    delete sa;
+    delete timer;
+    for( auto it = threadsMap.begin();  it != threadsMap.end(); it ++)
+    {
+        delete it;
+    }
+    threadsMap.clear();
+    sleepingThreads.clear();
+    readyThreads.clear();
+    availableThreadsId.clear();
+    runningThread = nullptr;
+
+}
+
+
+
+/////////////////SCHEDULE////////////////////////////////
+struct sigaction sa = {0};
+struct itimerval timer;
+
+void switchThreadsByQuantum(){
+    processQuantumCount++
+
+    for(auto it= sleepingThreads.begin(); it!= sleepingThreads.end(); it++) {
+        it->second->sleepingCount--;
+        if (it->second->sleepingCount == 0) {
+            it->second->state = READY;
+            readyThreads.push_back(it->second);
+            sleepingThreads.erase(it->first);
+        }
+    }
+
+    runningThread = readyThreads.front();
+    runningThread->state = RUNNING;
+    runningThread->threadQuantum ++;
+    readyThreads.erase(readyThreads.begin());
+
+}
+
+void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
+    if (setRequire){
+        sigsetjmp(curThread->env, 1);
+    }
+    runTimer();
+    siglongjmp(nextThread->env, 1);
+
+}
+
+
+
+ void runTimer() {
+     if (setitimer(ITIMER_VIRTUAL, &timer, NULL)) {
+
+     std::cerr << SET_TIMER_FAIL << std::endl;
+     freeAll();
+     exit(EXIT_FAILURE);
+ }
+}
+
+
+/**
+ *
+ * @param quantum
+ */
+void initTimer(int quantum) {
+
+    // init for the first interval of the timer, before start running
+    timer.it_value.tv_sec = quantum / 1000000;        // first time interval, seconds part
+    timer.it_value.tv_usec = quantum % 1000000;        // first time interval, microseconds part
+
+    timer.it_interval.tv_sec = quantum / 1000000;;    // following time intervals, seconds part
+    timer.it_interval.tv_usec = quantum % 1000000;;    // following time intervals, microseconds part
+    runTimer();
+}
+
+void signalHandler(int sig){
+    switchThreadsByQuantum();
+
+    if (sig==SIGVTALRM){
+        runningThread->state = READY;
+        readyThreads.push_back(runningThread);
+        setLongThreads(readyThreads.back(), runningThread, true);
+    }
+
+    if(sig == SIG)
+
+}
+
+
+void initScheduler(int quantum){
+
+    // timer initialization
+    initTimer(quantum);
+    sa.sa_handler = &signalHandler
+
+}
+
+
+
+/////////////////////////////////////////////////////////
+
+
+
+
+/////////////////////////////////////////////////////////
+
+///////////////////////////FUNCTION/////////////////////////
 /**
  * @brief initializes the thread library.
  *
@@ -118,6 +229,8 @@ int uthread_init(int quantum_usecs)
         std::cerr << INVALID_QUANTUM_SIZE << std::endl;
         return FAIL;
     }
+
+    setAvailableIndices(); // set all the available
     quantumCount = 0; // should increase to 1 in the scheduler - first time iteration
     //  initialize the first thread and push it to the threads vector
     int tid =  availableThreadsId.begin()
@@ -178,6 +291,7 @@ int uthread_spawn(thread_entry_point entry_point)
 int uthread_terminate(int tid){
     // if the given id is in the available means no anle to kill it
 
+    // TODO deal with exit and not return if needed
     if (inValid(tid))
     {
         return FAIL;
