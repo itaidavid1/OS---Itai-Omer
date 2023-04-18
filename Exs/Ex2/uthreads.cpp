@@ -8,6 +8,7 @@
 #include "map"
 #include "set"
 #include <sys/time.h>
+#include <signal.h>
 
 
 
@@ -25,22 +26,45 @@
 #define RUNNING_THREAD_IS_NULL "system error: There is no running thread currently "
 #define NOT_YET_INITIALIZE_THREADS "system error: First Initialize threads"
 #define SET_TIMER_FAIL "set timer failed"
+#define SIGNAL_SET_ERROR "system error: failed to create signal set"
+#define SIGNAL_ACTION_ERROR "system error: failed to action signal "
 
-///////GLOBALS////////
+
+
+//////////////// Additional Signals ///////////////
+#define SIG_TERMINATE (SIGVTALRM + 1)
+#define SIG_SLEEP (SIGVTALRM + 2)
+#define SIG_BLOCKED_HANDLE (SIGVTALRM + 3)
+
+///////////// thread setup helpers/////////////
+typedef unsigned long address_t
+#define JB_SP 6
+#define JB_PC 7
+ address_t translate_address(address_t addr)
+{
+    address_t ret;
+    asm volatile("xor    %%gs:0x18,%0\n"
+                 "rol    $0x9,%0\n"
+            : "=g" (ret)
+            : "0" (addr));
+    return ret;
+}
+///////////////////////////////////////
+
+///////GLOBALS/////////////////////
 int processQuantumCount = 0;
 // insering the available threads number
 std::set<int> availableThreadsId;
 ////////////////////////////////////
 
 
-
-
 /**
  * Enum for the 3 optional states of thread
  */
 typedef enum State{
-    READY, BLOCK, RUNNING
+    READY, BLOCKED, RUNNING
 } State;
+
 
 /**
  *
@@ -62,6 +86,7 @@ struct Thread{
         this->sleepingCount = 0;
         this->threadQuantum = 0;
         this->threadStack = new char[STACK_SIZE];
+        setup_thread(this->entryPoint);
         // TODO add setup function
     }
 
@@ -71,6 +96,16 @@ struct Thread{
 
     ~Thread(){
         delete[] this->threadStack;
+    }
+
+    void setup_thread( thread_entry_point entry_point)
+    {
+        sigsetjmp(env, 1);
+        address_t sp = (address_t) threadStack + STACK_SIZE - sizeof(address_t);
+        address_t pc = (address_t) entry_point;
+        (env->__jmpbuf)[JB_SP] = translate_address(sp);
+        (env->__jmpbuf)[JB_PC] = translate_address(pc);
+        sigemptyset(&(env->__saved_mask));
     }
 }  ;
 
@@ -96,6 +131,7 @@ bool inValid(int tid){
     return false;
 }
 
+
 void setAvailableIndices(){
     for (int i = 0; i < MAX_THREAD_NUM; i++) {
         availableThreadsId.insert(i);
@@ -115,31 +151,36 @@ void freeAll(){
     readyThreads.clear();
     availableThreadsId.clear();
     runningThread = nullptr;
-
 }
-
 
 
 /////////////////SCHEDULE////////////////////////////////
 struct sigaction sa = {0};
 struct itimerval timer;
+sigset_t sigSet;
+// MASKS
+#define MASK_ACTIVATE sigprocmask(SIG_BLOCK, &sigSet, nullptr);
+#define MASK_DEACTIVATE sigprocmask(SIG_UNBLOCK, &sigSet, nullptr);
 
-void switchThreadsByQuantum(){
-    processQuantumCount++
-
+Thread* switchThreadsByQuantum(){
+    // handeling sleeping threads
     for(auto it= sleepingThreads.begin(); it!= sleepingThreads.end(); it++) {
         it->second->sleepingCount--;
         if (it->second->sleepingCount == 0) {
-            it->second->state = READY;
-            readyThreads.push_back(it->second);
             sleepingThreads.erase(it->first);
+            if (it->second->state == READY) {
+                readyThreads.push_back(it->second);
+            }
         }
     }
-
+// initialize the first thread from the ready map to be the running
+    Thread * oldRunningThread = runningThread;
     runningThread = readyThreads.front();
     runningThread->state = RUNNING;
     runningThread->threadQuantum ++;
     readyThreads.erase(readyThreads.begin());
+    processQuantumCount++
+    return oldRunningThread;
 
 }
 
@@ -151,8 +192,6 @@ void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
     siglongjmp(nextThread->env, 1);
 
 }
-
-
 
  void runTimer() {
      if (setitimer(ITIMER_VIRTUAL, &timer, NULL)) {
@@ -180,35 +219,74 @@ void initTimer(int quantum) {
 }
 
 void signalHandler(int sig){
-    switchThreadsByQuantum();
+    Thread* oldRunning =  switchThreadsByQuantum();
 
     if (sig==SIGVTALRM){
-        runningThread->state = READY;
-        readyThreads.push_back(runningThread);
-        setLongThreads(readyThreads.back(), runningThread, true);
+        // running thread was update in switchThreads
+        oldRunning->state = READY;
+        readyThreads.push_back(oldRunning);
     }
 
-    if(sig == SIG)
+    if(sig == SIG_SLEEP){
+        oldRunning->state = READY;
+        sleepingThreads[oldRunning->threadId] = oldRunning;
+    }
+
+    if(sig == SIG_TERMINATE){
+        deleteThread(oldRunning->threadId);
+        setLongThreads(nullptr, runningThread, false);
+    }
+
+    else{
+        setLongThreads(oldRunning, runningThread, true);
+
+    }
+
+
+    // no need to handel anymore with block or to handle with terminate as well
 
 }
 
 
 void initScheduler(int quantum){
 
-    // timer initialization
+    sigemptyset(&sigSet);
+    sigaddset(&sigSet, SIGVTALRM);
+// timer initialization
+    sa.sa_handler = &signalHandler;
+    if(sigaction(SIGVTALRM, &sa, nullptr) < 0) {
+        std::cerr << SIGNAL_ACTION_ERROR  << std::endl;
+        freeAll();
+        exit(EXIT_FAILURE);
+    }
     initTimer(quantum);
-    sa.sa_handler = &signalHandler
+
 
 }
 
 
+void deleteThread(int tid){
+    Thread * thread = threadsMap[tid];
+    if(thread->state == READY){
+        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
+        readyThreads.erase(pos);
+    }
+
+    if(thread->sleepingCount > 0){
+        sleepingThreads.erase(tid);
+    }
+
+    //removing from map
+    threadsMap.erase(tid);
+    // delete the boject
+    delete thread;
+    //adding to available id's
+    availableThreadsId.insert(tid);
+}
 
 /////////////////////////////////////////////////////////
 
 
-
-
-/////////////////////////////////////////////////////////
 
 ///////////////////////////FUNCTION/////////////////////////
 /**
@@ -241,12 +319,13 @@ int uthread_init(int quantum_usecs)
     runningThread = threadsMap[0];
     runningThread->state = RUNNING;
     runningThread->threadQuantum++;
+
     processQuantumCount = 1;
 
     return EXIT_SUCCESS
 
     //  TODO anything else? changing the count?
-    // WHAT IS THE running thread
+
 
 }
 
@@ -264,6 +343,7 @@ int uthread_init(int quantum_usecs)
 */
 int uthread_spawn(thread_entry_point entry_point)
 {
+    MASK_ACTIVATE;
     if (threadsMap.size() >= MAX_THREAD_NUM){
         std::cerr << THREADS_OVERLOAD << std::endl;
         return FAIL;
@@ -274,6 +354,7 @@ int uthread_spawn(thread_entry_point entry_point)
     availableThreadsId.erase(avail_id);
     threadsMap[avail_id] = thread;
     readyThreads.push_back(thread);
+    MASK_DEACTIVATE;
     return avail_id;
 }
 
@@ -291,38 +372,23 @@ int uthread_spawn(thread_entry_point entry_point)
 int uthread_terminate(int tid){
     // if the given id is in the available means no anle to kill it
 
-    // TODO deal with exit and not return if needed
+  MASK_ACTIVATE;
     if (inValid(tid))
     {
         return FAIL;
     }
 
-    Thread* thread = threadsMap[tid];
-
-    //TODO check if TID ==0
-    //TODO chack if running
-    //  erasing from ready threads and sleeping threads
-    if(thread->state == READY){
-        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
-        readyThreads.erase(pos);
+    if(tid == 0)
+    {
+        freeAll();
+        exit(EXIT_SUCCESS);
     }
 
-    if(thread->sleepingCount > 0){
-        sleepingThreads.erase(tid);
-    }
-
-    //removing from map
-    threadsMap.erase(tid);
-    // delete the boject
-    delete thread;
-    //adding to available id's
-    availableThreadsId.insert(tid);
+    deleteThread(tid);
+    MASK_DEACTIVATE;
     return EXIT_SUCCESS
 
 }
-
-
-
 
 /**
  * @brief Blocks the thread with ID tid. The thread may be resumed later using uthread_resume.
@@ -334,31 +400,38 @@ int uthread_terminate(int tid){
  * @return On success, return 0. On failure, return -1.
 */
 int uthread_block(int tid){
-
+    MASK_ACTIVATE;
     if (inValid(tid))
     {
         return FAIL;
     }
     Thread* thread = threadsMap[tid];
 
-    if(thread->state == BLOCK){
+    if(thread->state == BLOCKED){
         std::cerr << INVALID_THREAD_BLOCK_ITSELF << std::endl;
         return FAIL;
     }
 
-    // TODO - If a thread blocks itself, a scheduling decision should be made handel that case
-
-    //TODO - handel if we block the running
-
-    // not sleeping and ready
-    if(thread->state == READY && !thread->isSleep()){
-        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
-        readyThreads.erase(pos);
+    if(thread->threadId == runningThread->threadId)
+    {
+        thread->state = BLOCKED;
+        signalHandler(SIG_BLOCKED_HANDLE)
     }
+    else{
+        //  If a thread blocks itself, a scheduling decision should be made handel that case THe same case
+        //  as- handel if we block the running
 
-    thread->state = BLOCK;
+        // not sleeping and ready
+        if(thread->state == READY && !thread->isSleep()){
+            auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
+            readyThreads.erase(pos);
+        }
 
-    // TODO schedual handel
+        // ready and sleeping
+        thread->state = BLOCKED;
+
+    }
+    MASK_DEACTIVATE;
     return EXIT_SUCCESS;
 
 }
@@ -388,7 +461,7 @@ int uthread_resume(int tid){
         std::cerr << INVALID_THREAD_ID_RESUME_RUNNING << std::endl;
         return FAIL;
     }
-    if(thread->state == BLOCK){
+    if(thread->state == BLOCKED){
         if(thread->sleepingCount == 0){
             readyThreads.push_back(thread);
         }
@@ -415,21 +488,20 @@ int uthread_resume(int tid){
 */
 int uthread_sleep(int num_quantums)
 {
+    MASK_ACTIVATE;
   if(num_quantums <= 0){
       std::cerr << INVALID_QUANTUM_SIZE << std::endl;
       return FAIL
   }
 
-  // sleep the current thread
-  runningThread->state = READY;
-  sleepingThreads[runningThread->threadId] = runningThread; // TODO validate changing the pointer
+  // updating the running thread sleeping time and updating it
   runningThread->sleepingCount = num_quantums;
 
-  runningThread = nullptr; // maybe not need
+  signalHandler(SIG_SLEEP);
+
+  MASK_DEACTIVATE;
   return EXIT_SUCCESS;
 
-  // TODO is schedualler responsibility to change the running to be readyTHread [0] ?
-  // TODO change the ready map to be vector !!!!!!!!!!!!!!!!!!!!!!
 
 }
 
