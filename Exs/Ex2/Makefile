@@ -9,8 +9,8 @@ INCS=-I.
 CFLAGS = -Wall -std=c++11 -g $(INCS)
 CXXFLAGS = -Wall -std=c++11 -g $(INCS)
 
-OSMLIB = libosm.a
-TARGETS = $(OSMLIB)
+UTHREADSLIB = libuthreads.a
+TARGETS = $(UTHREADSLIB)
 
 TAR=tar
 TARFLAGS=-cvf
@@ -24,7 +24,7 @@ $(TARGETS): $(LIBOBJ)
 	$(RANLIB) $@
 
 clean:
-	$(RM) $(TARGETS) $(OSMLIB) $(OBJ) $(LIBOBJ) *~ *core
+	$(RM) $(TARGETS) $(UTHREADSLIB) $(OBJ) $(LIBOBJ) *~ *core
 
 depend:
 	makedepend -- $(CFLAGS) -- $(SRC) $(LIBSRC)

@@ -9,12 +9,13 @@
 #include "set"
 #include <sys/time.h>
 #include <signal.h>
+#include <algorithm>
 
 
 
 //////// ERROR ///////////
 #define FAIL -1
-#defing SUCCESS 0
+#define SUCCESS 0
 #define INVALID_QUANTUM_SIZE "thread library error: Invalid quantum size- less than 0"
 #define THREADS_OVERLOAD "system error: The Threads capacity exceeded"
 #define INVALID_THREAD_ID "thread library error:  Thread Id is not in the valid range (0 to MAX_THREAD) "
@@ -37,7 +38,7 @@
 #define SIG_BLOCKED_HANDLE (SIGVTALRM + 3)
 
 ///////////// thread setup helpers/////////////
-typedef unsigned long address_t
+typedef unsigned long address_t;
 #define JB_SP 6
 #define JB_PC 7
  address_t translate_address(address_t addr)
@@ -56,6 +57,16 @@ int processQuantumCount = 0;
 // insering the available threads number
 std::set<int> availableThreadsId;
 ////////////////////////////////////
+
+//////////////////Schedule VARS /////////////////
+struct sigaction sa = {0};
+struct itimerval timer;
+sigset_t sigSet;
+// MASKS
+#define MASK_ACTIVATE sigprocmask(SIG_BLOCK, &sigSet, nullptr);
+#define MASK_DEACTIVATE sigprocmask(SIG_UNBLOCK, &sigSet, nullptr);
+
+
 
 
 /**
@@ -80,8 +91,8 @@ struct Thread{
     sigjmp_buf env;
 
     Thread(thread_entry_point entryPoint, int threadId){
-        this.entryPoint = entryPoint;
-        this.threadId= threadId;
+        this->entryPoint = entryPoint;
+        this->threadId= threadId;
         this->state = READY;
         this->sleepingCount = 0;
         this->threadQuantum = 0;
@@ -90,7 +101,7 @@ struct Thread{
         // TODO add setup function
     }
 
-    isSleep(){
+    bool isSleep(){
         return sleepingCount > 0;
     }
 
@@ -113,7 +124,7 @@ struct Thread{
 std::map<int,Thread*> threadsMap; // curr
 std::vector<Thread*> readyThreads; // queue
 std::map<int, Thread*> sleepingThreads; //sleeping
-Thread* runningThread
+Thread* runningThread;
 ////////////////////////////////////////////////////////////////////
 
 ////////////////////// HELPERS ////////////////////
@@ -121,12 +132,12 @@ bool inValid(int tid){
 
     if(tid < 0  || tid >= MAX_THREAD_NUM){
         std::cerr << INVALID_THREAD_ID << std::endl;
-        return true
+        return true;
     }
     if (availableThreadsId.find(tid) != availableThreadsId.end())
     {
         std::cerr << THREAD_ID_NOT_IN_USE << std::endl;
-        return true
+        return true;
     }
     return false;
 }
@@ -140,11 +151,9 @@ void setAvailableIndices(){
 
 void freeAll(){
 
-    delete sa;
-    delete timer;
     for( auto it = threadsMap.begin();  it != threadsMap.end(); it ++)
     {
-        delete it;
+        delete it->second;
     }
     threadsMap.clear();
     sleepingThreads.clear();
@@ -155,13 +164,35 @@ void freeAll(){
 
 
 /////////////////SCHEDULE////////////////////////////////
-struct sigaction sa = {0};
-struct itimerval timer;
-sigset_t sigSet;
-// MASKS
-#define MASK_ACTIVATE sigprocmask(SIG_BLOCK, &sigSet, nullptr);
-#define MASK_DEACTIVATE sigprocmask(SIG_UNBLOCK, &sigSet, nullptr);
 
+
+void deleteThread(int tid){
+    Thread * thread = threadsMap[tid];
+    if(thread->state == READY){
+        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
+        readyThreads.erase(pos);
+    }
+
+    if(thread->sleepingCount > 0){
+        sleepingThreads.erase(tid);
+    }
+
+    //removing from map
+    threadsMap.erase(tid);
+    // delete the boject
+    delete thread;
+    //adding to available id's
+    availableThreadsId.insert(tid);
+}
+
+void runTimer() {
+    if (setitimer(ITIMER_VIRTUAL, &timer, NULL)) {
+
+        std::cerr << SET_TIMER_FAIL << std::endl;
+        freeAll();
+        exit(EXIT_FAILURE);
+    }
+}
 Thread* switchThreadsByQuantum(){
     // handeling sleeping threads
     for(auto it= sleepingThreads.begin(); it!= sleepingThreads.end(); it++) {
@@ -179,9 +210,8 @@ Thread* switchThreadsByQuantum(){
     runningThread->state = RUNNING;
     runningThread->threadQuantum ++;
     readyThreads.erase(readyThreads.begin());
-    processQuantumCount++
+    processQuantumCount++;
     return oldRunningThread;
-
 }
 
 void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
@@ -193,14 +223,7 @@ void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
 
 }
 
- void runTimer() {
-     if (setitimer(ITIMER_VIRTUAL, &timer, NULL)) {
 
-     std::cerr << SET_TIMER_FAIL << std::endl;
-     freeAll();
-     exit(EXIT_FAILURE);
- }
-}
 
 
 /**
@@ -265,25 +288,6 @@ void initScheduler(int quantum){
 }
 
 
-void deleteThread(int tid){
-    Thread * thread = threadsMap[tid];
-    if(thread->state == READY){
-        auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
-        readyThreads.erase(pos);
-    }
-
-    if(thread->sleepingCount > 0){
-        sleepingThreads.erase(tid);
-    }
-
-    //removing from map
-    threadsMap.erase(tid);
-    // delete the boject
-    delete thread;
-    //adding to available id's
-    availableThreadsId.insert(tid);
-}
-
 /////////////////////////////////////////////////////////
 
 
@@ -309,9 +313,9 @@ int uthread_init(int quantum_usecs)
     }
 
     setAvailableIndices(); // set all the available
-    quantumCount = 0; // should increase to 1 in the scheduler - first time iteration
+//    processQuantumCount = 0; // should increase to 1 in the scheduler - first time iteration
     //  initialize the first thread and push it to the threads vector
-    int tid =  availableThreadsId.begin()
+    int tid =  *(availableThreadsId.begin());
     threadsMap[tid] = new Thread(nullptr, tid);
     //fixing the set the first id
     availableThreadsId.erase(tid);
@@ -322,11 +326,9 @@ int uthread_init(int quantum_usecs)
 
     processQuantumCount = 1;
 
-    return EXIT_SUCCESS
+    return EXIT_SUCCESS;
 
-    //  TODO anything else? changing the count?
-
-
+    //  TODO anyhing else? hanging the count?
 }
 
 /**
@@ -348,8 +350,8 @@ int uthread_spawn(thread_entry_point entry_point)
         std::cerr << THREADS_OVERLOAD << std::endl;
         return FAIL;
     }
-    int avail_id = availableThreadsId.begin();
-    Thread thread = new Thread(entry_point, avail_id);
+    int avail_id = *(availableThreadsId.begin());
+    Thread* thread = new Thread(entry_point, avail_id);
     // TODO : maybe add a check if thread allocation succeed
     availableThreadsId.erase(avail_id);
     threadsMap[avail_id] = thread;
@@ -386,7 +388,7 @@ int uthread_terminate(int tid){
 
     deleteThread(tid);
     MASK_DEACTIVATE;
-    return EXIT_SUCCESS
+    return EXIT_SUCCESS;
 
 }
 
@@ -415,7 +417,7 @@ int uthread_block(int tid){
     if(thread->threadId == runningThread->threadId)
     {
         thread->state = BLOCKED;
-        signalHandler(SIG_BLOCKED_HANDLE)
+        signalHandler(SIG_BLOCKED_HANDLE);
     }
     else{
         //  If a thread blocks itself, a scheduling decision should be made handel that case THe same case
@@ -491,7 +493,7 @@ int uthread_sleep(int num_quantums)
     MASK_ACTIVATE;
   if(num_quantums <= 0){
       std::cerr << INVALID_QUANTUM_SIZE << std::endl;
-      return FAIL
+      return FAIL;
   }
 
   // updating the running thread sleeping time and updating it
