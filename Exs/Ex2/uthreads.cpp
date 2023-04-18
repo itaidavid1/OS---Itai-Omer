@@ -41,11 +41,10 @@
 typedef unsigned long address_t;
 #define JB_SP 6
 #define JB_PC 7
- address_t translate_address(address_t addr)
-{
+address_t translate_address(address_t addr) {
     address_t ret;
-    asm volatile("xor    %%gs:0x18,%0\n"
-                 "rol    $0x9,%0\n"
+    asm volatile("xor    %%fs:0x30,%0\n"
+                 "rol    $0x11,%0\n"
             : "=g" (ret)
             : "0" (addr));
     return ret;
@@ -167,8 +166,9 @@ void freeAll(){
 
 
 void deleteThread(int tid){
+
     Thread * thread = threadsMap[tid];
-    if(thread->state == READY){
+    if(thread->state == READY && !thread->isSleep()) {
         auto pos = std::find(readyThreads.begin(), readyThreads.end(), thread);
         readyThreads.erase(pos);
     }
@@ -195,31 +195,42 @@ void runTimer() {
 }
 Thread* switchThreadsByQuantum(){
     // handeling sleeping threads
-    for(auto it= sleepingThreads.begin(); it!= sleepingThreads.end(); it++) {
+    auto it = sleepingThreads.begin();
+    while (it != sleepingThreads.end()) {
         it->second->sleepingCount--;
         if (it->second->sleepingCount == 0) {
-            sleepingThreads.erase(it->first);
             if (it->second->state == READY) {
                 readyThreads.push_back(it->second);
             }
+            sleepingThreads.erase(it++);
+        }
+        else {
+            ++it;
         }
     }
 // initialize the first thread from the ready map to be the running
     Thread * oldRunningThread = runningThread;
-    runningThread = readyThreads.front();
-    runningThread->state = RUNNING;
-    runningThread->threadQuantum ++;
-    readyThreads.erase(readyThreads.begin());
+    if(!readyThreads.empty()){
+        runningThread = readyThreads.front();
+        runningThread->state = RUNNING;
+        runningThread->threadQuantum ++;
+        readyThreads.erase(readyThreads.begin());
+    }
+
     processQuantumCount++;
     return oldRunningThread;
 }
 
 void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
+    int ret = 0;
     if (setRequire){
-        sigsetjmp(curThread->env, 1);
+        ret =  sigsetjmp(curThread->env, 1);
     }
-    runTimer();
-    siglongjmp(nextThread->env, 1);
+    if(ret ==0 ){
+        runTimer();
+        siglongjmp(nextThread->env, 1);
+    }
+
 
 }
 
@@ -242,6 +253,7 @@ void initTimer(int quantum) {
 }
 
 void signalHandler(int sig){
+    MASK_ACTIVATE;
     Thread* oldRunning =  switchThreadsByQuantum();
 
     if (sig==SIGVTALRM){
@@ -257,14 +269,15 @@ void signalHandler(int sig){
 
     if(sig == SIG_TERMINATE){
         deleteThread(oldRunning->threadId);
+        MASK_DEACTIVATE;
         setLongThreads(nullptr, runningThread, false);
     }
 
     else{
+        MASK_DEACTIVATE;
         setLongThreads(oldRunning, runningThread, true);
 
     }
-
 
     // no need to handel anymore with block or to handle with terminate as well
 
@@ -323,7 +336,7 @@ int uthread_init(int quantum_usecs)
     runningThread = threadsMap[0];
     runningThread->state = RUNNING;
     runningThread->threadQuantum++;
-
+    initScheduler(quantum_usecs);
     processQuantumCount = 1;
 
     return EXIT_SUCCESS;
@@ -345,11 +358,12 @@ int uthread_init(int quantum_usecs)
 */
 int uthread_spawn(thread_entry_point entry_point)
 {
-    MASK_ACTIVATE;
+
     if (threadsMap.size() >= MAX_THREAD_NUM){
         std::cerr << THREADS_OVERLOAD << std::endl;
         return FAIL;
     }
+    MASK_ACTIVATE;
     int avail_id = *(availableThreadsId.begin());
     Thread* thread = new Thread(entry_point, avail_id);
     // TODO : maybe add a check if thread allocation succeed
@@ -374,16 +388,23 @@ int uthread_spawn(thread_entry_point entry_point)
 int uthread_terminate(int tid){
     // if the given id is in the available means no anle to kill it
 
-  MASK_ACTIVATE;
+
     if (inValid(tid))
     {
         return FAIL;
     }
 
+
+    MASK_ACTIVATE;
     if(tid == 0)
     {
         freeAll();
+        MASK_DEACTIVATE;
         exit(EXIT_SUCCESS);
+    }
+
+    if(tid == runningThread->threadId){
+        signalHandler(SIG_TERMINATE);
     }
 
     deleteThread(tid);
@@ -402,7 +423,7 @@ int uthread_terminate(int tid){
  * @return On success, return 0. On failure, return -1.
 */
 int uthread_block(int tid){
-    MASK_ACTIVATE;
+
     if (inValid(tid))
     {
         return FAIL;
@@ -413,6 +434,7 @@ int uthread_block(int tid){
         std::cerr << INVALID_THREAD_BLOCK_ITSELF << std::endl;
         return FAIL;
     }
+    MASK_ACTIVATE;
 
     if(thread->threadId == runningThread->threadId)
     {
@@ -452,24 +474,24 @@ int uthread_resume(int tid){
     {
         return FAIL;
     }
-
+    MASK_ACTIVATE;
     Thread* thread = threadsMap[tid];
 
-    if(thread->state == READY){
-        std::cerr << INVALID_THREAD_ID_RESUME_READY << std::endl;
-        return FAIL;
-    }
-    if(thread->state == RUNNING){
-        std::cerr << INVALID_THREAD_ID_RESUME_RUNNING << std::endl;
-        return FAIL;
-    }
+//    if(thread->state == READY){
+//        std::cerr << INVALID_THREAD_ID_RESUME_READY << std::endl;
+//        return FAIL;
+//    }
+//    if(thread->state == RUNNING){
+//        std::cerr << INVALID_THREAD_ID_RESUME_RUNNING << std::endl;
+//        return FAIL;
+//    }
     if(thread->state == BLOCKED){
         if(thread->sleepingCount == 0){
             readyThreads.push_back(thread);
         }
         thread->state= READY;
     }
-
+    MASK_DEACTIVATE;
     return EXIT_SUCCESS;
 
 }
@@ -490,19 +512,19 @@ int uthread_resume(int tid){
 */
 int uthread_sleep(int num_quantums)
 {
+
+    if(num_quantums <= 0){
+        std::cerr << INVALID_QUANTUM_SIZE << std::endl;
+        return FAIL;
+    }
     MASK_ACTIVATE;
-  if(num_quantums <= 0){
-      std::cerr << INVALID_QUANTUM_SIZE << std::endl;
-      return FAIL;
-  }
+    // updating the running thread sleeping time and updating it
+    runningThread->sleepingCount = num_quantums;
 
-  // updating the running thread sleeping time and updating it
-  runningThread->sleepingCount = num_quantums;
+    signalHandler(SIG_SLEEP);
 
-  signalHandler(SIG_SLEEP);
-
-  MASK_DEACTIVATE;
-  return EXIT_SUCCESS;
+    MASK_DEACTIVATE;
+    return EXIT_SUCCESS;
 
 
 }
