@@ -13,7 +13,7 @@
 
 
 
-//////// ERROR ///////////
+////////////////// ERROR ////////////////////
 #define FAIL -1
 #define SUCCESS 0
 #define INVALID_QUANTUM_SIZE "thread library error: Invalid quantum size- less than 0"
@@ -29,6 +29,7 @@
 #define SET_TIMER_FAIL "set timer failed"
 #define SIGNAL_SET_ERROR "system error: failed to create signal set"
 #define SIGNAL_ACTION_ERROR "system error: failed to action signal "
+///////////////END//////////////////////////////
 
 
 
@@ -36,6 +37,7 @@
 #define SIG_TERMINATE (SIGVTALRM + 1)
 #define SIG_SLEEP (SIGVTALRM + 2)
 #define SIG_BLOCKED_HANDLE (SIGVTALRM + 3)
+///////////////END///////////////////////////////////
 
 ///////////// thread setup helpers/////////////
 typedef unsigned long address_t;
@@ -49,23 +51,23 @@ address_t translate_address(address_t addr) {
             : "0" (addr));
     return ret;
 }
-///////////////////////////////////////
+///////////////END//////////////////////////////
 
 ///////GLOBALS/////////////////////
 int processQuantumCount = 0;
 // insering the available threads number
 std::set<int> availableThreadsId;
-////////////////////////////////////
+///////////////END//////////////////////////////
+
 
 //////////////////Schedule VARS /////////////////
 struct sigaction sa = {0};
 struct itimerval timer;
 sigset_t sigSet;
+
 // MASKS
 #define MASK_ACTIVATE sigprocmask(SIG_BLOCK, &sigSet, nullptr);
 #define MASK_DEACTIVATE sigprocmask(SIG_UNBLOCK, &sigSet, nullptr);
-
-
 
 
 /**
@@ -77,7 +79,7 @@ typedef enum State{
 
 
 /**
- *
+ *The struct that hold the thread object
  */
 struct Thread{
 
@@ -89,6 +91,11 @@ struct Thread{
     int threadQuantum;
     sigjmp_buf env;
 
+    /**
+     * Constractor for the thread object
+     * @param entryPoint entry point of the thread
+     * @param threadId the unique keyId for the thread
+     */
     Thread(thread_entry_point entryPoint, int threadId){
         this->entryPoint = entryPoint;
         this->threadId= threadId;
@@ -99,7 +106,10 @@ struct Thread{
         setup_thread(this->entryPoint);
         // TODO add setup function
     }
-
+    /**
+     *
+     * @return true if the thread is in sleeping mode
+     */
     bool isSleep(){
         return sleepingCount > 0;
     }
@@ -107,26 +117,36 @@ struct Thread{
     ~Thread(){
         delete[] this->threadStack;
     }
-
+    /**
+     * setup the thread like in the demo-
+     * @param entry_point
+     */
     void setup_thread( thread_entry_point entry_point)
     {
         sigsetjmp(env, 1);
-        address_t sp = (address_t) threadStack + STACK_SIZE - sizeof(address_t);
+        address_t sp = (address_t) threadStack + STACK_SIZE - sizeof(address_t); // the allocation of the stacks 1 after
+        // the other
         address_t pc = (address_t) entry_point;
         (env->__jmpbuf)[JB_SP] = translate_address(sp);
         (env->__jmpbuf)[JB_PC] = translate_address(pc);
         sigemptyset(&(env->__saved_mask));
     }
 }  ;
+///////////////END//////////////////////////////
 
 /////////////////////////// Threads Management //////////////////
-std::map<int,Thread*> threadsMap; // curr
-std::vector<Thread*> readyThreads; // queue
-std::map<int, Thread*> sleepingThreads; //sleeping
-Thread* runningThread;
+std::map<int,Thread*> threadsMap; // all existing treads
+std::vector<Thread*> readyThreads; // queue of ready threads
+std::map<int, Thread*> sleepingThreads; //sleeping threads
+Thread* runningThread; // running thread
 ////////////////////////////////////////////////////////////////////
 
 ////////////////////// HELPERS ////////////////////
+/**
+ * The function checks the validation of input for tid
+ * @param tid tid
+ * @return true if the tid is valid and legal to use
+ */
 bool inValid(int tid){
 
     if(tid < 0  || tid >= MAX_THREAD_NUM){
@@ -141,13 +161,17 @@ bool inValid(int tid){
     return false;
 }
 
-
+/**
+ * crating the set of available tid's
+ */
 void setAvailableIndices(){
     for (int i = 0; i < MAX_THREAD_NUM; i++) {
         availableThreadsId.insert(i);
     }
 }
-
+/**
+ * Free all of the objects in case of exiting the program or killing the main threead
+ */
 void freeAll(){
 
     for( auto it = threadsMap.begin();  it != threadsMap.end(); it ++)
@@ -160,11 +184,15 @@ void freeAll(){
     availableThreadsId.clear();
     runningThread = nullptr;
 }
-
+///////////////END//////////////////////////////
 
 /////////////////SCHEDULE////////////////////////////////
 
-
+/**
+ * The function handel the action of deleting thread from all possible parts- removing from the data stractures and
+ * free the allocation memory
+ * @param tid
+ */
 void deleteThread(int tid){
 
     Thread * thread = threadsMap[tid];
@@ -184,7 +212,9 @@ void deleteThread(int tid){
     //adding to available id's
     availableThreadsId.insert(tid);
 }
-
+/**
+ * set and run the timer virtually
+ */
 void runTimer() {
     if (setitimer(ITIMER_VIRTUAL, &timer, NULL)) {
 
@@ -193,6 +223,13 @@ void runTimer() {
         exit(EXIT_FAILURE);
     }
 }
+
+/**
+ * The main function that handles the action of switching threads by end of quantum from all kind of
+ * signals. The function takes care on the sleeping thread time of sleep and also for switching the running
+ * thread and the first thread that is waiting in the ready queue, and increase the quantum count
+ * @return A pointer to the old thread
+ */
 Thread* switchThreadsByQuantum(){
     // handeling sleeping threads
     auto it = sleepingThreads.begin();
@@ -235,11 +272,9 @@ void setLongThreads(Thread * curThread, Thread * nextThread, bool setRequire){
 }
 
 
-
-
 /**
- *
- * @param quantum
+ * Initialize the timer
+ * @param quantum quantum size
  */
 void initTimer(int quantum) {
 
@@ -252,6 +287,12 @@ void initTimer(int quantum) {
     runTimer();
 }
 
+/**
+ * The main scheduler function that handles with all the cases of signal in the process.
+ * the functiom actiave the mask and by all kind of signals deals with the switching and the actions
+ * that rquire
+ * @param sig the sig to handel with- indicate time, sleep, block or terminate
+ */
 void signalHandler(int sig){
     MASK_ACTIVATE;
     Thread* oldRunning =  switchThreadsByQuantum();
@@ -283,20 +324,23 @@ void signalHandler(int sig){
 
 }
 
-
+/**
+ * initialize the scheduler params like in the demo
+ * @param quantum quantum for the timer
+ */
 void initScheduler(int quantum){
 
     sigemptyset(&sigSet);
     sigaddset(&sigSet, SIGVTALRM);
-// timer initialization
+    // timer initialization
     sa.sa_handler = &signalHandler;
+    // Install timer_handler as the signal handler for SIGVTALRM.
     if(sigaction(SIGVTALRM, &sa, nullptr) < 0) {
         std::cerr << SIGNAL_ACTION_ERROR  << std::endl;
         freeAll();
         exit(EXIT_FAILURE);
     }
     initTimer(quantum);
-
 
 }
 
@@ -324,7 +368,6 @@ int uthread_init(int quantum_usecs)
         std::cerr << INVALID_QUANTUM_SIZE << std::endl;
         return FAIL;
     }
-
     setAvailableIndices(); // set all the available
 //    processQuantumCount = 0; // should increase to 1 in the scheduler - first time iteration
     //  initialize the first thread and push it to the threads vector
@@ -340,8 +383,7 @@ int uthread_init(int quantum_usecs)
     processQuantumCount = 1;
 
     return EXIT_SUCCESS;
-
-    //  TODO anyhing else? hanging the count?
+    // initialize the main thread- the first action
 }
 
 /**
@@ -358,19 +400,19 @@ int uthread_init(int quantum_usecs)
 */
 int uthread_spawn(thread_entry_point entry_point)
 {
-
+    // creating a new thread, with id and put it inside all the data structures- map, ready queue
     if (threadsMap.size() >= MAX_THREAD_NUM){
         std::cerr << THREADS_OVERLOAD << std::endl;
         return FAIL;
     }
-    MASK_ACTIVATE;
+    MASK_ACTIVATE; // blocking actions
     int avail_id = *(availableThreadsId.begin());
     Thread* thread = new Thread(entry_point, avail_id);
     // TODO : maybe add a check if thread allocation succeed
     availableThreadsId.erase(avail_id);
     threadsMap[avail_id] = thread;
     readyThreads.push_back(thread);
-    MASK_DEACTIVATE;
+    MASK_DEACTIVATE;  // unblocking
     return avail_id;
 }
 
@@ -386,27 +428,24 @@ int uthread_spawn(thread_entry_point entry_point)
  * itself or the main thread is terminated, the function does not return.
 */
 int uthread_terminate(int tid){
-    // if the given id is in the available means no anle to kill it
-
 
     if (inValid(tid))
     {
         return FAIL;
     }
-
-
+    // activate mask after validation
     MASK_ACTIVATE;
-    if(tid == 0)
+    if(tid == 0) // killing the main thread- finish all the process
     {
         freeAll();
-        MASK_DEACTIVATE;
+        MASK_DEACTIVATE; // deactivating when
         exit(EXIT_SUCCESS);
     }
 
-    if(tid == runningThread->threadId){
+    if(tid == runningThread->threadId){ // terminate the main thread
         signalHandler(SIG_TERMINATE);
     }
-
+     // else terminated thread from sleeping block or ready- no affect on the current running thread or entire process
     deleteThread(tid);
     MASK_DEACTIVATE;
     return EXIT_SUCCESS;
@@ -428,21 +467,21 @@ int uthread_block(int tid){
     {
         return FAIL;
     }
-    Thread* thread = threadsMap[tid];
+    Thread* thread = threadsMap[tid]; // block thread
 
     if(thread->state == BLOCKED){
         std::cerr << INVALID_THREAD_BLOCK_ITSELF << std::endl;
         return FAIL;
     }
-    MASK_ACTIVATE;
+    MASK_ACTIVATE; // activating mask after validation of edge cases
 
-    if(thread->threadId == runningThread->threadId)
+    if(thread->threadId == runningThread->threadId) // handling blocking running thread
     {
         thread->state = BLOCKED;
         signalHandler(SIG_BLOCKED_HANDLE);
     }
     else{
-        //  If a thread blocks itself, a scheduling decision should be made handel that case THe same case
+        //  If a thread blocks itself, a scheduling decision should be made handle that case the same case
         //  as- handel if we block the running
 
         // not sleeping and ready
@@ -469,7 +508,7 @@ int uthread_block(int tid){
  * @return On success, return 0. On failure, return -1.
 */
 int uthread_resume(int tid){
-
+    // resuming thread that was blocked before
     if (inValid(tid))
     {
         return FAIL;
@@ -477,14 +516,6 @@ int uthread_resume(int tid){
     MASK_ACTIVATE;
     Thread* thread = threadsMap[tid];
 
-//    if(thread->state == READY){
-//        std::cerr << INVALID_THREAD_ID_RESUME_READY << std::endl;
-//        return FAIL;
-//    }
-//    if(thread->state == RUNNING){
-//        std::cerr << INVALID_THREAD_ID_RESUME_RUNNING << std::endl;
-//        return FAIL;
-//    }
     if(thread->state == BLOCKED){
         if(thread->sleepingCount == 0){
             readyThreads.push_back(thread);
