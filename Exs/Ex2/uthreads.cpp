@@ -124,11 +124,14 @@ struct Thread{
     void setup_thread( thread_entry_point entry_point)
     {
         sigsetjmp(env, 1);
-        address_t sp = (address_t) threadStack + STACK_SIZE - sizeof(address_t); // the allocation of the stacks 1 after
-        // the other
-        address_t pc = (address_t) entry_point;
-        (env->__jmpbuf)[JB_SP] = translate_address(sp);
-        (env->__jmpbuf)[JB_PC] = translate_address(pc);
+        // if the entry point isn't associated with the main Thread
+        if(entry_point != nullptr){
+            address_t sp = (address_t) threadStack + STACK_SIZE - sizeof(address_t); // the allocation of the stacks 1 after
+            // the other
+            address_t pc = (address_t) entry_point;
+            (env->__jmpbuf)[JB_SP] = translate_address(sp);
+            (env->__jmpbuf)[JB_PC] = translate_address(pc);
+        }
         sigemptyset(&(env->__saved_mask));
     }
 }  ;
