@@ -17,8 +17,8 @@
 
 struct JobContext {
     pthread_t * threads;
-    JobState  jobState;
-    std::atomic<int> atomic_counter;
+//    JobState  jobState;
+    std::atomic<int> atomic_counter; // count the number of input parts
     std::atomic<int> intermediate_counter;
     std::atomic<int> shuffle_vector_size;
     std::atomic<int> reduce_counter;
@@ -40,7 +40,7 @@ struct JobContext {
 
 struct ThreadContext{
     int tid;
-    std::atomic<int>* atomic_counter;
+//    std::atomic<int>* atomic_counter;
     IntermediateVec* intermediate_vector;
     JobContext* jobContext;
 
@@ -49,8 +49,11 @@ struct ThreadContext{
 void emit2 (K2* key, V2* value, void* context){
     ThreadContext* threadContext = (ThreadContext*) context;
     threadContext->intermediate_vector->push_back(new IntermediatePair(key, value));
-    threadContext->jobContext->intermediate_counter ++;
+    // increase the cursize of the the job data
+    threadContext->jobContext->state_data ++;
+//    threadContext->jobContext->intermediate_counter ++;
     // todo check if not need fetchadd
+    // why do we need the counter above
 
 
 }
@@ -83,7 +86,7 @@ void init_stage(JobContext* jobContext, stage_t stage){
 //    stage_t stage = jobContext->jobState.stage;
     if (!jobContext->init_state_flag){
         jobContext->init_state_flag = true;
-        jobContext->jobState.stage = stage;
+//        jobContext->jobState.stage = stage;
         if(stage == MAP_STAGE){
             jobContext->state_data = ((unsigned long ) (stage) <<62 ) + ((unsigned int) (jobContext->inputVec->size()) <<31 )
         }
@@ -115,7 +118,7 @@ void start_map_stage(JobContext* jobContext){
         std::cerr << MUTEX_LOCK_FAIL << std::endl;
         exit(FAILURE);
     }
-    init_stage(JobContext* jobContext)
+    init_stage(JobContext* jobContext);
     // return prev counter value
 
 }
@@ -165,6 +168,7 @@ void do_shuffle(ThreadContext* threadContext){
                 shuffle_map.at(K_V_pair.first).push_back(K_V_pair);
             }
         //TODO : add atomic counter
+        jobContext.state_data ++;
         }
     }
     for (auto key_to_vals :shuffle_map){
@@ -192,7 +196,8 @@ void do_reduce( JobContext* jobContext){
             break;
         }
         auto popped_vec_pointer = jobContext.shuffle_vector->back();
-        jobContext.reduce_counter ++;
+//        jobContext.reduce_counter ++;
+        jobContext->state_data++; // using the shared data counter
         if(pthread_mutex_unlock(&jobContext->reduce_mutex)!=0){
             std::cerr << MUTEX_LOCK_FAIL << std::endl;
             exit(FAILURE);
@@ -214,8 +219,13 @@ void * run_map_reduce(void* arg){
     // do barrier
     t_context->jobContext->barrier->barrier();
 
+
+
+    // counter == 0 for shuffle part
     // do shuffle
     if (t_context->tid == 0){
+        t_context->jobContext->state_data >> 31;
+        t_context->jobContext->state_data << 31;
         do_shuffle(t_context);
     }
 
@@ -243,7 +253,7 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
     .shuffle_vector_size = {0},
     .reduce_counter = {0},
     .intermediate_counter = {0},
-    .jobState = new JobState {UNDEFINED_STAGE, 0.0},
+//    .jobState = new JobState {UNDEFINED_STAGE, 0.0}, // not needed
     .atomic_counter = {0},
     .map_mutex = {0},
     .reduce_mutex = {0},
@@ -289,10 +299,54 @@ void waitForJob(JobHandle job){
 
 }
 void getJobState(JobHandle job, JobState* state){
-
+    JobContext* jobContext = (JobContext *) job;
+    std::atomic<uint64_t> job_data = jobContext->state_data.load();
+    stage_t stage = static_cast<stage_t> job_data>>62; // todo if need static cast or regular
+    long int total_size = (job_data >> 31) & (1U<<31 - 1);
+    long int cur_size = (job_data) & (1U<<31 - 1);
+    float percentage = cur_sreducize / total_size;
+    state->percentage = percentage;
+    state->stage = stage;
 
 }
 
-void closeJobHandle(JobHandle job);
+void closeJobHandle(JobHandle job){
+    waitForJob(job); // waitin for job to finish
+    JobContext jobContext = (JobContext*) job;
+
+    if (pthread_mutex_destroy(&(jobContext->reduce_mutex)) != 0) {
+        std::cerr << MUTEX_DESTROY_FAIL << std::endl;
+        exit(FAILURE);
+    }
+    if (pthread_mutex_destroy(&(jobContext->map_mutex)) != 0) {
+        std::cerr << MUTEX_DESTROY_FAIL << std::endl;
+        exit(FAILURE);
+    }
+    if (pthread_mutex_destroy(&(jobContext->emit_mutex)) != 0) {
+        std::cerr << MUTEX_DESTROY_FAIL << std::endl;
+        exit(FAILURE);
+    }
+    if (pthread_mutex_destroy(&(jobContext->init_mutex)) != 0) {
+        std::cerr << MUTEX_DESTROY_FAIL << std::endl;
+        exit(FAILURE);
+    }
+    if (pthread_mutex_destroy(&(jobContext->wait_for_job_mutex)) != 0) {
+        std::cerr << MUTEX_DESTROY_FAIL << std::endl;
+        exit(FAILURE);
+    }
+//    pthread_mutex_destroy(jobContext.reduce_mutex);
+//    pthread_mutex_destroy(jobContext.map_mutex);
+//    pthread_mutex_destroy(jobContext.emit_mutex);
+//    pthread_mutex_destroy(jobContext.init_mutex);
+//    pthread_mutex_destroy(jobContext.wait_for_job_mutex);
+
+    delete[] jobContext.t_context;
+    delete[] jobContext.threads;
+    delete job_context;
+
+
+
+
+}
 
 
