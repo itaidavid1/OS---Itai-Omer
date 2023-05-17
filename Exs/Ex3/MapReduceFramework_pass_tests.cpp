@@ -15,6 +15,7 @@
 #define PTHREAD_JOIN_FAIL "system error: pthread join failed"
 #define MUTEX_DESTROY_FAIL "system error: fail to destroy mutex"
 # define BITWISE_31 ((1U<<31) - 1)
+# define MAP_FLAG true
 
 
 struct ThreadContext{
@@ -54,28 +55,39 @@ struct JobContext {
 //    std::atomic<int> reduce_counter;
 };
 typedef std::pair<JobContext* , int> JobTID;
-
+/**
+ * pushing the pair of the key value to the intermediate vector of the given thread
+ * @param key key
+ * @param value value
+ * @param context thread context to push the pair to the vector in each thread
+ */
 void emit2 (K2* key, V2* value, void* context){
     ThreadContext* threadContext = (ThreadContext*) context;
     threadContext->intermediate_vector->push_back(IntermediatePair(key, value));
     // increase the cursize of the the job data
     JobContext* jobContext = (JobContext*) threadContext->jobContext;
-    jobContext->shuffle_vector_size ++;
-    // todo check if not need fetchadd
-    // why do we need the counter above
+    jobContext->shuffle_vector_size ++; // updating the size of the num of elements- key- value pairs
+    // to future shuffle
+
 
 
 }
+/**
+ * The
+ * @param key key of element
+ * @param value  value of element
+ * @param context job context in this case- pushing the shuffled elements to the output vector- shared date
+ */
 void emit3 (K3* key, V3* value, void* context){
 
     JobContext* jobContext = (JobContext*) context;
 
-    // added mutex for locking with touching the shared data
+    // added mutex for locking with touching the shared data-the output vector
     if(pthread_mutex_lock(&jobContext->emit_mutex)!=0){
         std::cerr << MUTEX_LOCK_FAIL << std::endl;
         exit(FAILURE);
     }
-
+    // pushing the pair to the output vector
     jobContext->outputVec.push_back(OutputPair (key, value));
 
     if(pthread_mutex_unlock(&jobContext->emit_mutex)!=0){
@@ -83,11 +95,18 @@ void emit3 (K3* key, V3* value, void* context){
         exit(FAILURE);
     }
 
-   jobContext->atomic_counter++;
+   jobContext->atomic_counter++; // count the num of the elements we pushed to the output vector
 
 }
 
+/**
+ * initialize the stage element- the 64 bit int that holds all the information- stage and percentage
+ * using before each stgae- map, shuffle and reduce
+ * @param jobContext jobContext
+ * @param stage flag to indicate the stage we start
+ */
 void init_stage(JobContext* jobContext, stage_t stage){
+    // mutex to lock-happen 1 time and accessing to shared flag- init-stage
     if(pthread_mutex_lock(&jobContext->init_mutex)!=0){
         std::cerr << MUTEX_LOCK_FAIL << std::endl;
         exit(FAILURE);
@@ -108,30 +127,10 @@ void init_stage(JobContext* jobContext, stage_t stage){
         exit(FAILURE);
     }
 }
-
-
-// todo no need of this func
-//void start_map_stage(JobContext* jobContext){
-//    // mutex lock
-//    if(pthread_mutex_lock(&jobContext->map_mutex)!=0){
-//        std::cerr << MUTEX_LOCK_FAIL << std::endl;
-//        exit(FAILURE);
-//    };
-//    //get counter value
-//    if (jobContext->jobState.stage == UNDEFINED_STAGE){
-//        jobContext->jobState.stage = MAP_STAGE;
-//    }
-//    //TODO: create the weird vector with the bit shifting
-//    // mutex unlock
-//    if(pthread_mutex_unlock(&jobContext->map_mutex)!=0){
-//        std::cerr << MUTEX_LOCK_FAIL << std::endl;
-//        exit(FAILURE);
-//    }
-//    init_stage(JobContext* jobContext);
-//    // return prev counter value
-//
-//}
-
+/**
+ * the main function that do the map phase for every thread
+ * @param threadContext threadContext
+ */
 void do_map(ThreadContext* threadContext){
     JobContext* jobContext = (JobContext *)threadContext->jobContext;
 
@@ -152,25 +151,34 @@ void do_map(ThreadContext* threadContext){
 
 //  new version
 
-    while (true){
-        long int avail_index = jobContext->atomic_counter.fetch_add(1);
+    while (MAP_FLAG){
+        long int avail_index = jobContext->atomic_counter.fetch_add(1); // index of threads
         if (avail_index >= (long int) jobContext->inputVec.size()){
             break;
         }
-        jobContext->state_data ++;
+        jobContext->state_data ++; // updating the state data element- the size of element for %
         InputPair pair_to_map = jobContext->inputVec[avail_index];
-        jobContext->client.map(pair_to_map.first, pair_to_map.second, threadContext);
+        auto key = pair_to_map.first;
+        auto val = pair_to_map.second;
+        jobContext->client.map(key, val, threadContext); // mapping
         // threadContext->intermediate_vector->push_back(intermediatePair);
     }
 
     //create the intermediate vectors # TODO : check if needed
 
 }
-
+/**
+ * The function that sort each intermediate vector im each one of the threads
+ * @param threadContext the thread context which holds the intermediate data
+ */
 void do_sort(ThreadContext* threadContext){
     std::sort(threadContext->intermediate_vector->begin(),threadContext->intermediate_vector->end());
 }
-
+/**
+ * The main function that handle the shuffle action. The function set the state counter to be in the right phase,
+ * load the total parts to shuffle- the size of the
+ * @param jobContext the job context
+ */
 void do_shuffle(JobContext* jobContext){
     struct CompareKeys {
         bool operator()(const K2* first, const K2* second) const {
@@ -180,8 +188,8 @@ void do_shuffle(JobContext* jobContext){
 //    JobContext* jobContext = (JobContext*) threadContext->jobContext;
 //    int num_shuffle = 0;
     // here shuffle vector size holds the number of <key,val> pairs in all data set
-    int total_to_shuffle = jobContext->shuffle_vector_size.load(); // get the num of shufled from map phse
-    jobContext->state_data = (2UL << 62) + ((unsigned long)(total_to_shuffle) << 31);
+    int total_to_shuffle = jobContext->shuffle_vector_size.load(); // get the num of shufled from map phase
+    jobContext->state_data = (2UL << 62) + ((unsigned long)(total_to_shuffle) << 31); // change
 
     jobContext->init_state_flag = false;
     jobContext->shuffle_vector_size = 0; // make all the counter 0 and flag before reduce phase
