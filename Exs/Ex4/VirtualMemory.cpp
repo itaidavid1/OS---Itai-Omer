@@ -1,5 +1,4 @@
 #include "VirtualMemory.h"
-#include "MemoryConstants.h"
 #include "PhysicalMemory.h"
 #include <cmath>
 #include <cstdio>
@@ -7,15 +6,14 @@
 
 #define BIT_MASK 1
 
-
 int calculate_cyc_diff(uint64_t cur_page_number, uint64_t page_swapped_in){
     if(cur_page_number > page_swapped_in){
-        return fmin(NUM_PAGES - cur_page_number - page_swapped_in,
+        return fmin(NUM_PAGES - (cur_page_number - page_swapped_in),
                     cur_page_number - page_swapped_in);
 
     }
     else{
-        return fmin(NUM_PAGES - page_swapped_in - cur_page_number,
+        return fmin(NUM_PAGES - (page_swapped_in - cur_page_number),
                     page_swapped_in - cur_page_number);
     }
 }
@@ -60,6 +58,7 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
         // todo : calculate evicted pages
         // cur page - need to calculate the tree traversal
         //calculate
+
         int cur_cyc_dist = calculate_cyc_diff(cur_page_number ,page_swapped_in);
 
         if(cur_cyc_dist > *(max_cyc_diff) && cur_frame != head_frame)
@@ -92,10 +91,6 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
                                            frame_to_evict,parent_to_evict,head_frame, frame_ind_in_parent_to_evict,
                                            i,page_swapped_in,(cur_page_number << OFFSET_WIDTH) + i);
             if(ret_frame != 0){
-                if (ret_frame == child_idx){
-                    *(parent_to_evict) = head_frame;
-                    *(frame_ind_in_parent_to_evict) = i;
-                }
                 return ret_frame;
             }
 
@@ -103,6 +98,8 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
     }
 
     if (is_frame_empty && head_frame != cur_frame){ // found a frame and return it
+        *(parent_to_evict) = parent_frame;
+        *(frame_ind_in_parent_to_evict) = frame_ind_from_parent;
         return head_frame;
     }
 
