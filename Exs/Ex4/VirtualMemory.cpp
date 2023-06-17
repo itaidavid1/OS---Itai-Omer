@@ -2,6 +2,7 @@
 #include "MemoryConstants.h"
 #include "PhysicalMemory.h"
 #include <cmath>
+#include <cstdio>
 
 
 #define BIT_MASK 1
@@ -13,10 +14,10 @@ int calculate_cyc_diff(uint64_t cur_page_number, uint64_t page_swapped_in){
                     cur_page_number - page_swapped_in);
 
     }
-   else{
+    else{
         return fmin(NUM_PAGES - page_swapped_in - cur_page_number,
                     page_swapped_in - cur_page_number);
-   }
+    }
 }
 
 int check_frame_empty(int frame){ // helper to find if all the table is 0
@@ -35,23 +36,24 @@ int check_frame_empty(int frame){ // helper to find if all the table is 0
 /**
  *
  * @param head_frame the current frame in the tree traversal
- * @param cur_level
+ * @param cur_level the curr depth of the tree - stop conditon
  * @param cur_frame the frame we started the dfs check for- not changing during the run
- * @param max_frame_used
- * @param max_cyc_diff
- * @param page_to_evict
- * @param frame_to_evict
+ * @param max_frame_used  the max index frame so far
+ * @param max_cyc_diff max_cyc_diff
+ * @param page_to_evict page_to_evict
+ * @param frame_to_evict frame_to_evict
  * @param parent_frame
  * @param parent_frame_table_idx
  * @param page_swapped_in
  * @param cur_page_number
  * @return
  */
-int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_frame_used,int* max_cyc_diff, int* page_to_evict,
-                   int* frame_to_evict, int * parent_to_evict, int parent_frame, int* frame_ind_in_parent_to_evict, int frame_ind_from_parent, uint64_t page_swapped_in, uint64_t cur_page_number ){
+int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_frame_used,int* max_cyc_diff, uint64_t* page_to_evict,
+                   int* frame_to_evict, int * parent_to_evict, int parent_frame, int* frame_ind_in_parent_to_evict,
+                   int frame_ind_from_parent, uint64_t page_swapped_in, uint64_t cur_page_number ){
 
     if (head_frame > *max_frame_used){ // update the max frame use index
-        *max_frame_used = head_frame;
+        *(max_frame_used) = head_frame;
     }
 
     if (cur_level == TABLES_DEPTH){ // validation of finish dfs until the depth
@@ -67,7 +69,6 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
             *(page_to_evict) = cur_page_number;
             *(parent_to_evict) = parent_frame;
             *(frame_ind_in_parent_to_evict) = frame_ind_from_parent;
-
         }
 
         return 0;
@@ -78,8 +79,8 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
 //    if (is_frame_empty && head_frame != cur_frame){ // found a frame and return it
 //        return head_frame;
 //    }
-
     //
+
     bool is_frame_empty = true;
     for (int i = 0; i < PAGE_SIZE; i++){
         int child_idx = 0;
@@ -87,17 +88,21 @@ int next_frame_dfs(int head_frame, int cur_level,uint64_t cur_frame, int* max_fr
         if(child_idx !=0 ){
             is_frame_empty = false;
 //              cur_page_number = (cur_page_number << OFFSET_WIDTH) + i; // todo to the bfs
-
-            if (next_frame_dfs(child_idx, cur_level + 1,cur_frame, max_frame_used,max_cyc_diff,page_to_evict,frame_to_evict,parent_to_evict,head_frame, frame_ind_in_parent_to_evict,i,page_swapped_in,(cur_page_number << OFFSET_WIDTH) + i) != 0){
-                return child_idx; // problem
+            int ret_frame = next_frame_dfs(child_idx, cur_level + 1,cur_frame, max_frame_used,max_cyc_diff,page_to_evict,
+                                           frame_to_evict,parent_to_evict,head_frame, frame_ind_in_parent_to_evict,
+                                           i,page_swapped_in,(cur_page_number << OFFSET_WIDTH) + i);
+            if(ret_frame != 0){
+                if (ret_frame == child_idx){
+                    *(parent_to_evict) = head_frame;
+                    *(frame_ind_in_parent_to_evict) = i;
+                }
+                return ret_frame;
             }
+
         }
     }
 
-
     if (is_frame_empty && head_frame != cur_frame){ // found a frame and return it
-        *(parent_to_evict) = parent_frame;
-        *(frame_ind_in_parent_to_evict) = frame_ind_from_parent;
         return head_frame;
     }
 
@@ -115,7 +120,7 @@ int find_next_available_frame(uint64_t cur_frame, uint64_t page_swapped_in){
 
     // option 3
     int max_cyc_diff = 0;
-    int page_to_evict = 0;
+    uint64_t page_to_evict = 0;
     int frame_to_evict = 0;
     int parent_to_evict = 0;
 
@@ -130,12 +135,12 @@ int find_next_available_frame(uint64_t cur_frame, uint64_t page_swapped_in){
                                               &frame_ind_in_parent_to_evict,0, page_swapped_in,
                                               0); // todo fix dfs argments
     if(next_available_frame != 0){
-        PMwrite(parent_to_evict + frame_ind_in_parent_to_evict, 0);
+        PMwrite(parent_to_evict*PAGE_SIZE  + frame_ind_in_parent_to_evict, 0);
         return next_available_frame; // first option - find if there is a frame with all 0
     }
     if(max_frame_used + 1 < NUM_FRAMES){
         max_frame_base_address = (max_frame_used + 1 ) * PAGE_SIZE;
-        for(int i = 0; i< NUM_PAGES; i++){
+        for(int i = 0; i< PAGE_SIZE; i++){
             PMwrite(max_frame_base_address + i, 0); // all 0 in the new frame
         }
         return max_frame_used + 1;
@@ -143,13 +148,13 @@ int find_next_available_frame(uint64_t cur_frame, uint64_t page_swapped_in){
 
     // cycle
     PMevict(frame_to_evict, page_to_evict);
-    for(int i = 0; i< NUM_PAGES; i++){
+    for(int i = 0; i< PAGE_SIZE; i++){
         frame_to_evict_base_address = (frame_to_evict ) * PAGE_SIZE;
         PMwrite(frame_to_evict_base_address + i, 0); // all 0 in the new frame
     }
     // disconnect the parent of the current table
     // we get the
-    PMwrite(parent_to_evict + frame_ind_in_parent_to_evict, 0);
+    PMwrite(parent_to_evict * PAGE_SIZE + frame_ind_in_parent_to_evict, 0);
 
 
     return frame_to_evict;
@@ -162,8 +167,8 @@ int find_next_available_frame(uint64_t cur_frame, uint64_t page_swapped_in){
 
 uint64_t get_table_bits(uint64_t address, int tree_level){
     uint64_t cur_add = address >> OFFSET_WIDTH; // drop the offset
-    cur_add = cur_add >> ((TABLES_DEPTH - tree_level - 1) * OFFSET_WIDTH); // shift bits
-    return cur_add & OFFSET_WIDTH;
+    cur_add = cur_add >> ((TABLES_DEPTH - tree_level -1 ) * OFFSET_WIDTH); // shift bits
+    return cur_add & (PAGE_SIZE - 1);
 }
 
 /**
@@ -228,6 +233,7 @@ int VMread(uint64_t virtualAddress, word_t* value){
 //        return 0; // todo verify if we need to deal with page fault or address 0
 //    }
     PMread(physical_address_to_read, value);
+    return 1;
 }
 
 /* Writes a word to the given virtual address.
@@ -244,5 +250,7 @@ int VMwrite(uint64_t virtualAddress, word_t value){
 //    if(physical_address_to_read == 0){
 //        return 0; // todo verify if we need to deal with page fault or address 0
 //    }
+    printf("address value %llu %d\n", (long long int)physical_address_to_read , value);
     PMwrite(physical_address_to_read, value);
+    return 1;
 }
