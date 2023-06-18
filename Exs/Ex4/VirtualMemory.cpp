@@ -215,6 +215,9 @@ int VMread(uint64_t virtualAddress, word_t* value){
     }
     // convert virtual to physical address
     uint64_t physical_address_to_read = convert_virtual2physical(virtualAddress);
+    if(physical_address_to_read == 0 && TABLES_DEPTH > 0 ){
+        return 0;
+    }
     PMread(physical_address_to_read, value);
     return 1;
 }
@@ -230,6 +233,9 @@ int VMwrite(uint64_t virtualAddress, word_t value){
         return 0;
     }
     uint64_t physical_address_to_read = convert_virtual2physical(virtualAddress);
+    if(physical_address_to_read == 0 && TABLES_DEPTH > 0 ){
+        return 0;
+    }
     PMwrite(physical_address_to_read, value);
     return 1;
 }
